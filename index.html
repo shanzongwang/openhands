@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番茄钟</title>
+<style>
+  :root {
+    --focus: #e05b4a;
+    --break: #3aa17e;
+    --bg: #f4f1ec;
+    --card: #ffffff;
+    --text: #2f2b28;
+    --muted: #8a8079;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .card {
+    width: min(92vw, 420px);
+    background: var(--card);
+    border-radius: 24px;
+    padding: 36px 32px 28px;
+    box-shadow: 0 12px 40px rgba(47, 43, 40, 0.12);
+    text-align: center;
+  }
+
+  .mode {
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 999px;
+    font-size: 15px;
+    letter-spacing: 1px;
+    color: #fff;
+    background: var(--focus);
+    transition: background 0.3s;
+  }
+  body.break-mode .mode { background: var(--break); }
+
+  .time {
+    font-size: 84px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 2px;
+    margin: 22px 0 6px;
+    line-height: 1;
+  }
+
+  .progress {
+    height: 8px;
+    border-radius: 999px;
+    background: #ece7e1;
+    overflow: hidden;
+    margin: 18px 0 26px;
+  }
+  .progress span {
+    display: block;
+    height: 100%;
+    width: 100%;
+    background: var(--focus);
+    transition: width 0.25s linear, background 0.3s;
+  }
+  body.break-mode .progress span { background: var(--break); }
+
+  .controls {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+  }
+
+  button {
+    font-family: inherit;
+    font-size: 16px;
+    padding: 12px 28px;
+    border: none;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s, background 0.2s;
+  }
+  button:active { transform: scale(0.96); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .primary { background: var(--focus); color: #fff; }
+  body.break-mode .primary { background: var(--break); }
+  .ghost { background: #ece7e1; color: var(--text); }
+
+  .count {
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid #ece7e1;
+    font-size: 15px;
+    color: var(--muted);
+  }
+  .count strong {
+    color: var(--focus);
+    font-size: 22px;
+    margin: 0 4px;
+  }
+  body.break-mode .count strong { color: var(--break); }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="mode" id="mode">专注时间</div>
+
+    <div class="time" id="time">25:00</div>
+
+    <div class="progress"><span id="bar"></span></div>
+
+    <div class="controls">
+      <button class="primary" id="startPause">开始</button>
+      <button class="ghost" id="reset">重置</button>
+    </div>
+
+    <div class="count">今天已完成 <strong id="count">0</strong> 个番茄</div>
+  </main>
+
+<script>
+(function () {
+  "use strict";
+
+  var FOCUS_SECONDS = 25 * 60;
+  var BREAK_SECONDS = 5 * 60;
+  var STORAGE_KEY = "pomodoro.stats";
+
+  var els = {
+    mode: document.getElementById("mode"),
+    time: document.getElementById("time"),
+    bar: document.getElementById("bar"),
+    startPause: document.getElementById("startPause"),
+    reset: document.getElementById("reset"),
+    count: document.getElementById("count")
+  };
+
+  var state = {
+    phase: "focus",        // "focus" | "break"
+    remaining: FOCUS_SECONDS,
+    running: false,
+    timerId: null
+  };
+
+  function todayKey() {
+    var d = new Date();
+    var m = String(d.getMonth() + 1).padStart(2, "0");
+    var day = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + m + "-" + day;
+  }
+
+  function loadCount() {
+    try {
+      var data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      return data.date === todayKey() ? (data.count || 0) : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function saveCount(count) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ date: todayKey(), count: count }));
+    } catch (e) {
+      /* 隐私模式下 localStorage 可能不可用，忽略即可 */
+    }
+  }
+
+  function totalSeconds() {
+    return state.phase === "focus" ? FOCUS_SECONDS : BREAK_SECONDS;
+  }
+
+  function format(seconds) {
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  }
+
+  function render() {
+    els.time.textContent = format(state.remaining);
+    els.mode.textContent = state.phase === "focus" ? "专注时间" : "休息时间";
+    document.body.classList.toggle("break-mode", state.phase === "break");
+    els.bar.style.width = (state.remaining / totalSeconds() * 100) + "%";
+    els.startPause.textContent = state.running ? "暂停" : "开始";
+    els.count.textContent = loadCount();
+  }
+
+  function tick() {
+    state.remaining -= 1;
+    if (state.remaining <= 0) {
+      state.remaining = 0;
+      render();
+      completePhase();
+      return;
+    }
+    render();
+  }
+
+  function completePhase() {
+    stopTimer();
+    playSound();
+
+    if (state.phase === "focus") {
+      saveCount(loadCount() + 1);
+      state.phase = "break";
+      state.remaining = BREAK_SECONDS;
+    } else {
+      state.phase = "focus";
+      state.remaining = FOCUS_SECONDS;
+    }
+    render();
+  }
+
+  function startTimer() {
+    if (state.running) return;
+    state.running = true;
+    state.timerId = setInterval(tick, 1000);
+    render();
+  }
+
+  function stopTimer() {
+    state.running = false;
+    if (state.timerId !== null) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+    }
+  }
+
+  function toggle() {
+    if (state.running) {
+      stopTimer();
+      render();
+    } else {
+      startTimer();
+    }
+  }
+
+  function reset() {
+    stopTimer();
+    state.phase = "focus";
+    state.remaining = FOCUS_SECONDS;
+    render();
+  }
+
+  var audioCtx = null;
+  function playSound() {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!audioCtx) audioCtx = new Ctx();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+
+      // 三声提示音，无需任何外部音频文件
+      [0, 0.45, 0.9].forEach(function (offset) {
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        var t = audioCtx.currentTime + offset;
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, t);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 0.35);
+      });
+    } catch (e) {
+      /* 浏览器不支持或禁止播放时静默失败 */
+    }
+  }
+
+  els.startPause.addEventListener("click", toggle);
+  els.reset.addEventListener("click", reset);
+
+  render();
+})();
+</script>
+</body>
+</html>
